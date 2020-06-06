@@ -1,5 +1,9 @@
-use crate::decode::{
-    DecoderError, FiniteBuffer, FiniteMutBuffer, SliceableBuffer, SliceableMutBuffer, TypeDecoder,
+use crate::{
+    buffer::{
+        BorrowedBuffer, BorrowedMutBuffer, FiniteBuffer, FiniteMutBuffer, Result, SliceableBuffer,
+        SliceableMutBuffer,
+    },
+    decode::TypeDecoder,
 };
 
 macro_rules! impl_slice {
@@ -11,9 +15,9 @@ macro_rules! impl_slice {
             fn slice(
                 self,
                 offset: usize,
-            ) -> std::result::Result<(Self::Slice, Self), DecoderError> {
-                self.ensure_len(offset)?;
-                let (a, b) = self.$split(offset);
+            ) -> Result<Self::Slice, Self> {
+                let ((), buffer) = self.ensure_len(offset)?;
+                let (a, b) = buffer.$split(offset);
                 Ok((a, b))
             }
         }
@@ -29,12 +33,17 @@ macro_rules! impl_slice {
         where
             B::Slice: Into<$ty>,
         {
-            type Error = DecoderError;
-
             #[inline(always)]
-            fn decode_from(buffer: B) -> Result<(Self, B), Self::Error> {
+            fn decode_type(buffer: B) -> Result<Self, B> {
                 let (slice, rest) = buffer.consume();
                 Ok((slice.into(), rest))
+            }
+        }
+
+        impl<$a> BorrowedBuffer<$a> for $ty {
+            #[inline(always)]
+            fn into_less_safe_slice(self) -> &$a [u8] {
+                &self[..]
             }
         }
     };
@@ -45,8 +54,8 @@ impl_slice!('a, &'a mut [u8], split_at_mut);
 
 impl FiniteMutBuffer for &mut [u8] {
     #[inline(always)]
-    fn as_less_safe_slice_mut(&mut self) -> &mut [u8] {
-        self.as_mut()
+    fn as_less_safe_mut_slice(&mut self) -> &mut [u8] {
+        self
     }
 }
 
@@ -55,6 +64,13 @@ impl<'a> SliceableMutBuffer for &'a mut [u8] {
 
     #[inline(always)]
     fn freeze(self) -> Self::FrozenSlice {
+        self
+    }
+}
+
+impl<'a> BorrowedMutBuffer<'a> for &'a mut [u8] {
+    #[inline(always)]
+    fn into_less_safe_mut_slice(self) -> &'a mut [u8] {
         self
     }
 }

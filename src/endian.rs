@@ -1,4 +1,7 @@
-use crate::decode::{Decoder, SliceableBuffer};
+use crate::{
+    buffer::{Result, SliceableBuffer},
+    decode::Decoder,
+};
 
 macro_rules! impl_endian {
     ($name:ident) => {
@@ -9,11 +12,16 @@ macro_rules! impl_endian {
         where
             $name: Decoder<T, B>,
         {
-            type Error = <$name as Decoder<T, B>>::Error;
-
             #[inline(always)]
-            fn decode_from(self, buffer: B) -> Result<(T, B), Self::Error> {
+            fn decode_from(self, buffer: B) -> Result<T, B> {
                 $name.decode_from(buffer)
+            }
+        }
+
+        impl Into<Endian> for $name {
+            #[inline(always)]
+            fn into(self) -> Endian {
+                Endian::$name
             }
         }
     };
@@ -28,15 +36,13 @@ pub enum Endian {
     Little,
 }
 
-impl<T, B: SliceableBuffer, Error> Decoder<T, B> for Endian
+impl<T, B: SliceableBuffer> Decoder<T, B> for Endian
 where
-    Big: Decoder<T, B, Error = Error>,
-    Little: Decoder<T, B, Error = Error>,
+    Big: Decoder<T, B>,
+    Little: Decoder<T, B>,
 {
-    type Error = Error;
-
     #[inline(always)]
-    fn decode_from(self, buffer: B) -> Result<(T, B), Self::Error> {
+    fn decode_from(self, buffer: B) -> Result<T, B> {
         match self {
             Self::Little => Little.decode_from(buffer),
             Self::Big => Big.decode_from(buffer),
@@ -48,10 +54,8 @@ impl<T, B: SliceableBuffer> Decoder<T, B> for &Endian
 where
     Endian: Decoder<T, B>,
 {
-    type Error = <Endian as Decoder<T, B>>::Error;
-
     #[inline(always)]
-    fn decode_from(self, buffer: B) -> Result<(T, B), Self::Error> {
+    fn decode_from(self, buffer: B) -> Result<T, B> {
         (*self).decode_from(buffer)
     }
 }

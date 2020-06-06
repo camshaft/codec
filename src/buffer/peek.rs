@@ -1,4 +1,4 @@
-use crate::decode::{DecoderError, FiniteBuffer, FiniteMutBuffer, SliceableBuffer};
+use crate::buffer::{FiniteBuffer, FiniteMutBuffer, Result, SliceableBuffer};
 
 macro_rules! impl_peek {
     ($name:ident, [$($derive:ident),*], $a:lifetime, $ty:ty) => {
@@ -6,6 +6,7 @@ macro_rules! impl_peek {
         pub struct $name<$a>($ty);
 
         impl<$a> $name<$a> {
+            #[inline(always)]
             pub fn new(buffer: $ty) -> Self {
                 Self(buffer)
             }
@@ -15,8 +16,8 @@ macro_rules! impl_peek {
             type Slice = $name<$a>;
 
             #[inline(always)]
-            fn slice(self, offset: usize) -> Result<(Self::Slice, Self), DecoderError> {
-                let (a, b) = self.0.slice(offset)?;
+            fn slice(self, offset: usize) -> Result<Self::Slice, Self> {
+                let (a, b) = self.0.slice(offset).map_err(|err| err.map_buffer($name))?;
                 Ok(($name(a), $name(b)))
             }
         }
@@ -35,7 +36,7 @@ impl_peek!(PeekMutBuffer, [], 'a, &'a mut [u8]);
 
 impl<'a> FiniteMutBuffer for PeekMutBuffer<'a> {
     #[inline(always)]
-    fn as_less_safe_slice_mut(&mut self) -> &mut [u8] {
+    fn as_less_safe_mut_slice(&mut self) -> &mut [u8] {
         &mut self.0
     }
 }
