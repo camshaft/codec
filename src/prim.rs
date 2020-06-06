@@ -1,15 +1,46 @@
 use crate::{
-    buffer::{FiniteBuffer, FiniteMutBuffer, Result, SliceableBuffer},
+    buffer::{FiniteBuffer, Result, SliceableBuffer},
     decode::{Decoder, TypeDecoder},
+    encode::{Encoder, EncoderBuffer, TypeEncoder},
     endian::{Big, Little, NETWORK},
 };
 use core::convert::TryInto;
 
-// encode::{Encoder, EncoderBuffer, EncoderCursor, TypeEncoder},
-//
+macro_rules! impl_int_tests {
+    ($ty:ident, $tests:ident) => {
+        #[cfg(test)]
+        mod $tests {
+            use super::*;
+            use core::mem::size_of;
+
+            #[test]
+            fn round_trip_test() {
+                let mut buffer = [0; size_of::<$ty>()];
+                let slice = &mut buffer[..];
+
+                macro_rules! round_trip {
+                    ($value: expr) => {
+                        let value: $ty = $value;
+                        assert_eq!(slice.encoding_len(&value), Ok(size_of::<$ty>()));
+                        slice.encode::<$ty>(value).unwrap();
+                        let (v, _) = slice.decode::<$ty>().unwrap();
+                        assert_eq!(v, value);
+                    };
+                }
+
+                round_trip!(1);
+                round_trip!($ty::MIN);
+                round_trip!($ty::MIN + 1);
+                round_trip!($ty::MAX / 2);
+                round_trip!($ty::MAX - 1);
+                round_trip!($ty::MAX);
+            }
+        }
+    };
+}
 
 macro_rules! impl_byte {
-    ($ty:ident) => {
+    ($ty:ident, $tests:ident) => {
         impl<B: SliceableBuffer> TypeDecoder<B> for $ty {
             #[inline(always)]
             fn decode_type(buffer: B) -> Result<Self, B> {
@@ -20,22 +51,31 @@ macro_rules! impl_byte {
             }
         }
 
-        // impl<B: EncoderBuffer> TypeEncoder<B> for $ty {
-        //     fn encode_type(self, buffer: B) -> Result<EncoderCursor<$ty, B::Slice>, B> {
-        //         buffer.encode_slice_with::<$ty, _>(|mut slice| {
-        //             slice.as_less_safe_mut_slice()[0] = self as u8;
-        //             Ok(((), slice))
-        //         })
-        //     }
-        // }
+        impl<B> TypeEncoder<B> for $ty
+        where
+            B: EncoderBuffer,
+        {
+            fn encode_type(self, buffer: B) -> Result<(), B> {
+                let (_, buffer) = buffer.encode_bytes(&[self as u8])?;
+                Ok(((), buffer))
+            }
+        }
+
+        impl<B: EncoderBuffer> TypeEncoder<B> for &$ty {
+            fn encode_type(self, buffer: B) -> Result<(), B> {
+                (*self).encode_type(buffer)
+            }
+        }
+
+        impl_int_tests!($ty, $tests);
     };
 }
 
-impl_byte!(u8);
-impl_byte!(i8);
+impl_byte!(u8, u8_tests);
+impl_byte!(i8, i8_tests);
 
 macro_rules! impl_integer {
-    ($ty:ident) => {
+    ($ty:ident $(, $tests:ident)?) => {
         impl<B: SliceableBuffer> TypeDecoder<B> for $ty {
             #[inline(always)]
             fn decode_type(buffer: B) -> Result<Self, B> {
@@ -43,14 +83,17 @@ macro_rules! impl_integer {
             }
         }
 
-        // impl<B: EncoderBuffer> TypeEncoder<B> for $ty
-        // where
-        //     B::Slice: FiniteMutBuffer,
-        // {
-        //     fn encode_type(self, buffer: B) -> Result<EncoderCursor<$ty, B::Slice>, B> {
-        //         NETWORK.encode_into(self, buffer)
-        //     }
-        // }
+        impl<B: EncoderBuffer> TypeEncoder<B> for $ty {
+            fn encode_type(self, buffer: B) -> Result<(), B> {
+                NETWORK.encode_into(self, buffer)
+            }
+        }
+
+        impl<B: EncoderBuffer> TypeEncoder<B> for &$ty {
+            fn encode_type(self, buffer: B) -> Result<(), B> {
+                (*self).encode_type(buffer)
+            }
+        }
 
         impl<B: SliceableBuffer> Decoder<$ty, B> for Big {
             #[inline(always)]
@@ -67,19 +110,18 @@ macro_rules! impl_integer {
             }
         }
 
-        // impl<B: EncoderBuffer> Encoder<$ty, B> for Big
-        // where
-        //     B::Slice: FiniteMutBuffer,
-        // {
-        //     fn encode_into(self, value: $ty, buffer: B) -> Result<EncoderCursor<$ty, B::Slice>, B> {
-        //         buffer.encode_slice_with::<$ty, _>(|mut slice| {
-        //             slice
-        //                 .as_less_safe_mut_slice()
-        //                 .copy_from_slice(&value.to_be_bytes());
-        //             Ok(((), slice))
-        //         })
-        //     }
-        // }
+        impl<B: EncoderBuffer> Encoder<$ty, B> for Big {
+            fn encode_into(self, value: $ty, buffer: B) -> Result<(), B> {
+                let (_, buffer) = buffer.encode_bytes(&value.to_be_bytes())?;
+                Ok(((), buffer))
+            }
+        }
+
+        impl<B: EncoderBuffer> Encoder<&$ty, B> for Big {
+            fn encode_into(self, value: &$ty, buffer: B) -> Result<(), B> {
+                self.encode_into(*value, buffer)
+            }
+        }
 
         impl<B: SliceableBuffer> Decoder<$ty, B> for Little {
             #[inline(always)]
@@ -96,32 +138,35 @@ macro_rules! impl_integer {
             }
         }
 
-        // impl<B: EncoderBuffer> Encoder<$ty, B> for Little
-        // where
-        //     B::Slice: FiniteMutBuffer,
-        // {
-        //     fn encode_into(self, value: $ty, buffer: B) -> Result<EncoderCursor<$ty, B::Slice>, B> {
-        //         buffer.encode_slice_with::<$ty, _>(|mut slice| {
-        //             slice
-        //                 .as_less_safe_mut_slice()
-        //                 .copy_from_slice(&value.to_le_bytes());
-        //             Ok(((), slice))
-        //         })
-        //     }
-        // }
+        impl<B: EncoderBuffer> Encoder<$ty, B> for Little {
+            fn encode_into(self, value: $ty, buffer: B) -> Result<(), B> {
+                let (_, buffer) = buffer.encode_bytes(&value.to_be_bytes())?;
+                Ok(((), buffer))
+            }
+        }
+
+        impl<B: EncoderBuffer> Encoder<&$ty, B> for Little {
+            fn encode_into(self, value: &$ty, buffer: B) -> Result<(), B> {
+                self.encode_into(*value, buffer)
+            }
+        }
+
+        $(
+            impl_int_tests!($ty, $tests);
+        )*
     };
 }
 
-impl_integer!(u16);
-impl_integer!(i16);
-impl_integer!(u32);
-impl_integer!(i32);
-impl_integer!(u64);
-impl_integer!(i64);
-impl_integer!(u128);
-impl_integer!(i128);
-impl_integer!(usize);
-impl_integer!(isize);
+impl_integer!(u16, u16_tests);
+impl_integer!(i16, i16_tests);
+impl_integer!(u32, u32_tests);
+impl_integer!(i32, i32_tests);
+impl_integer!(u64, u64_tests);
+impl_integer!(i64, i64_tests);
+impl_integer!(u128, u128_tests);
+impl_integer!(i128, i128_tests);
+impl_integer!(usize, usize_tests);
+impl_integer!(isize, isize_tests);
 impl_integer!(f32);
 impl_integer!(f64);
 

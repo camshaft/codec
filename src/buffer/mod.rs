@@ -185,10 +185,10 @@ pub trait FiniteBuffer: SliceableBuffer {
     }
 
     #[inline(always)]
-    fn ensure_len(self, expected: usize) -> Result<(), Self> {
+    fn ensure_len(self, expected: usize) -> Result<usize, Self> {
         let actual = self.len();
         if actual >= expected {
-            Ok(((), self))
+            Ok((actual, self))
         } else {
             Err(BufferError {
                 reason: BufferErrorReason::UnexpectedEof { actual, expected },
@@ -210,12 +210,12 @@ pub trait FiniteBuffer: SliceableBuffer {
     }
 
     #[inline(always)]
-    fn ensure_alignment<T>(self) -> Result<(), Self> {
+    fn ensure_alignment<T>(self) -> Result<usize, Self> {
         let requirement = core::mem::align_of::<T>();
         let misalignment =
             (self.as_less_safe_slice().as_ptr() as *const _ as *const () as usize) % requirement;
         if misalignment == 0 {
-            Ok(((), self))
+            Ok((requirement, self))
         } else {
             Err(BufferError {
                 reason: BufferErrorReason::UnexpectedAlignment {
