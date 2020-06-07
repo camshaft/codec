@@ -1,6 +1,7 @@
 use crate::{
     buffer::{FiniteBuffer, FiniteMutBuffer, Result, SliceableBuffer, SliceableMutBuffer},
     decode::{Decoder, TypeDecoder},
+    encode::{EncoderBuffer, TypeEncoder},
 };
 use core::{
     cmp::Ordering,
@@ -38,6 +39,18 @@ macro_rules! impl_ref {
             value: PhantomData<T>,
         }
 
+        impl<T, Buffer: FiniteBuffer> $name<T, Buffer> {
+            pub fn as_bytes(&self) -> &[u8] {
+                self.buffer.0.as_less_safe_slice()
+            }
+        }
+
+        impl<T, Buffer: FiniteMutBuffer> $name<T, Buffer> {
+            pub fn as_mut_bytes(&mut self) -> &mut [u8] {
+                self.buffer.0.as_less_safe_mut_slice()
+            }
+        }
+
         impl<T: FromBytes + PartialEq<U> $(+ $constraint)*, B: FiniteBuffer, U> PartialEq<U> for $name<T, B> {
             #[inline(always)]
             fn eq(&self, rhs: &U) -> bool {
@@ -69,7 +82,7 @@ macro_rules! impl_ref {
                 let (owner, buffer) = buffer.slice(size_of::<T>())?;
                 $(
                     {
-                        if let Err(err) = owner.peek_buffer().$ensure_alignment::<T>() {
+                        if let Err(err) = owner.lookahead().$ensure_alignment::<T>() {
                             return Err($crate::buffer::BufferError {
                                 reason: err.reason,
                                 buffer,
@@ -82,6 +95,32 @@ macro_rules! impl_ref {
                     value: PhantomData,
                 };
                 Ok((value, buffer))
+            }
+        }
+
+        impl<T, B, E> TypeEncoder<E> for $name<T, B>
+        where
+            T: AsBytes $(+ $constraint)*,
+            B: $slice_ty,
+            E: EncoderBuffer,
+        {
+            #[inline(always)]
+            fn encode_type(self, buffer: E) -> Result<(), E> {
+                let (_, buffer) = buffer.encode_bytes(self.as_bytes())?;
+                Ok(((), buffer))
+            }
+        }
+
+        impl<T, B, E> TypeEncoder<E> for &$name<T, B>
+        where
+            T: AsBytes $(+ $constraint)*,
+            B: $slice_ty,
+            E: EncoderBuffer,
+        {
+            #[inline(always)]
+            fn encode_type(self, buffer: E) -> Result<(), E> {
+                let (_, buffer) = buffer.encode_bytes(self.as_bytes())?;
+                Ok(((), buffer))
             }
         }
     };

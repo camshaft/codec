@@ -1,6 +1,6 @@
 use crate::{
     buffer::{
-        BufferError, FiniteBuffer, FiniteMutBuffer, PeekBuffer, PeekMutBuffer, Result,
+        BufferError, FiniteBuffer, FiniteMutBuffer, LookaheadBuffer, LookaheadMutBuffer, Result,
         SliceableBuffer, SliceableMutBuffer,
     },
     encode::{EncodeWithCursor, EncoderBuffer, EncoderCursor},
@@ -20,14 +20,14 @@ macro_rules! impl_bytes {
             }
 
             #[inline(always)]
-            fn slice_with<T, F: FnOnce(PeekBuffer) -> Result<T, PeekBuffer>>(
+            fn slice_with<T, F: FnOnce(LookaheadBuffer) -> Result<T, LookaheadBuffer>>(
                 self,
                 len: usize,
                 f: F,
             ) -> Result<T, Self> {
                 let (_len, buffer) = self.ensure_len(len)?;
                 let (value, mut buffer) =
-                    map_buffer_error!(f(PeekBuffer::new(&buffer[..len])), buffer);
+                    map_buffer_error!(f(LookaheadBuffer::new(&buffer[..len])), buffer);
                 drop(buffer.split_to(len));
                 Ok((value, buffer))
             }
@@ -49,14 +49,14 @@ impl SliceableMutBuffer for BytesMut {
     type FrozenSlice = Bytes;
 
     #[inline(always)]
-    fn slice_mut_with<T, F: FnOnce(PeekMutBuffer) -> Result<T, PeekMutBuffer>>(
+    fn slice_mut_with<T, F: FnOnce(LookaheadMutBuffer) -> Result<T, LookaheadMutBuffer>>(
         self,
         len: usize,
         f: F,
     ) -> Result<T, Self> {
         let (_len, mut buffer) = self.ensure_len(len)?;
         let (value, mut buffer) =
-            map_buffer_error!(f(PeekMutBuffer::new(&mut buffer[..len])), buffer);
+            map_buffer_error!(f(LookaheadMutBuffer::new(&mut buffer[..len])), buffer);
         drop(buffer.split_to(len));
         Ok((value, buffer))
     }
@@ -68,6 +68,7 @@ impl SliceableMutBuffer for BytesMut {
 }
 
 impl FiniteMutBuffer for BytesMut {
+    #[inline(always)]
     fn as_less_safe_mut_slice(&mut self) -> &mut [u8] {
         self.as_mut()
     }
@@ -76,15 +77,37 @@ impl FiniteMutBuffer for BytesMut {
 impl EncoderBuffer for BytesMut {
     type Slice = Self;
 
+    #[inline(always)]
     fn capacity(&self) -> usize {
         self.len()
     }
 
-    fn encode_bytes(self, bytes: &[u8]) -> Result<usize, Self> {
+    #[inline(always)]
+    fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self> {
+        let bytes = bytes.as_ref();
         let len = bytes.len();
         let (mut slice, buffer) = self.slice(len)?;
         slice.as_less_safe_mut_slice().copy_from_slice(bytes);
         Ok((len, buffer))
+    }
+
+    #[inline(always)]
+    fn encode_checkpoint<F>(self, f: F) -> Result<Self::Slice, Self>
+    where
+        F: FnOnce(Self) -> Result<(), Self>,
+    {
+        let initial_len = self.len();
+
+        match f(self.clone()) {
+            Ok(((), buffer)) => {
+                let consumed_len = initial_len - buffer.capacity();
+                self.slice(consumed_len)
+            }
+            Err(err) => Err(BufferError {
+                reason: err.reason,
+                buffer: self,
+            }),
+        }
     }
 }
 

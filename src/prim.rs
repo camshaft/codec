@@ -55,13 +55,22 @@ macro_rules! impl_byte {
         where
             B: EncoderBuffer,
         {
+            #[inline(always)]
             fn encode_type(self, buffer: B) -> Result<(), B> {
-                let (_, buffer) = buffer.encode_bytes(&[self as u8])?;
+                let (_, buffer) = buffer.encode_bytes([self as u8])?;
                 Ok(((), buffer))
             }
         }
 
         impl<B: EncoderBuffer> TypeEncoder<B> for &$ty {
+            #[inline(always)]
+            fn encode_type(self, buffer: B) -> Result<(), B> {
+                (*self).encode_type(buffer)
+            }
+        }
+
+        impl<B: EncoderBuffer> TypeEncoder<B> for &mut $ty {
+            #[inline(always)]
             fn encode_type(self, buffer: B) -> Result<(), B> {
                 (*self).encode_type(buffer)
             }
@@ -84,12 +93,21 @@ macro_rules! impl_integer {
         }
 
         impl<B: EncoderBuffer> TypeEncoder<B> for $ty {
+            #[inline(always)]
             fn encode_type(self, buffer: B) -> Result<(), B> {
                 NETWORK.encode_into(self, buffer)
             }
         }
 
         impl<B: EncoderBuffer> TypeEncoder<B> for &$ty {
+            #[inline(always)]
+            fn encode_type(self, buffer: B) -> Result<(), B> {
+                (*self).encode_type(buffer)
+            }
+        }
+
+        impl<B: EncoderBuffer> TypeEncoder<B> for &mut $ty {
+            #[inline(always)]
             fn encode_type(self, buffer: B) -> Result<(), B> {
                 (*self).encode_type(buffer)
             }
@@ -111,14 +129,23 @@ macro_rules! impl_integer {
         }
 
         impl<B: EncoderBuffer> Encoder<$ty, B> for Big {
+            #[inline(always)]
             fn encode_into(self, value: $ty, buffer: B) -> Result<(), B> {
-                let (_, buffer) = buffer.encode_bytes(&value.to_be_bytes())?;
+                let (_, buffer) = buffer.encode_bytes(value.to_be_bytes())?;
                 Ok(((), buffer))
             }
         }
 
         impl<B: EncoderBuffer> Encoder<&$ty, B> for Big {
+            #[inline(always)]
             fn encode_into(self, value: &$ty, buffer: B) -> Result<(), B> {
+                self.encode_into(*value, buffer)
+            }
+        }
+
+        impl<B: EncoderBuffer> Encoder<&mut $ty, B> for Big {
+            #[inline(always)]
+            fn encode_into(self, value: &mut $ty, buffer: B) -> Result<(), B> {
                 self.encode_into(*value, buffer)
             }
         }
@@ -139,14 +166,23 @@ macro_rules! impl_integer {
         }
 
         impl<B: EncoderBuffer> Encoder<$ty, B> for Little {
+            #[inline(always)]
             fn encode_into(self, value: $ty, buffer: B) -> Result<(), B> {
-                let (_, buffer) = buffer.encode_bytes(&value.to_be_bytes())?;
+                let (_, buffer) = buffer.encode_bytes(value.to_be_bytes())?;
                 Ok(((), buffer))
             }
         }
 
         impl<B: EncoderBuffer> Encoder<&$ty, B> for Little {
+            #[inline(always)]
             fn encode_into(self, value: &$ty, buffer: B) -> Result<(), B> {
+                self.encode_into(*value, buffer)
+            }
+        }
+
+        impl<B: EncoderBuffer> Encoder<&mut $ty, B> for Little {
+            #[inline(always)]
+            fn encode_into(self, value: &mut $ty, buffer: B) -> Result<(), B> {
                 self.encode_into(*value, buffer)
             }
         }
@@ -195,6 +231,65 @@ macro_rules! impl_tuple {
             }
         }
 
+        impl<
+            _B: EncoderBuffer,
+            $($prev: TypeEncoder<_B>,)*
+            $current: TypeEncoder<_B>
+        > TypeEncoder<_B> for ($($prev,)* $current,) {
+            #[inline(always)]
+            fn encode_type(self, buffer: _B) -> Result<(), _B> {
+                #![allow(non_snake_case)]
+                let ($($prev ,)* $current,) = self;
+                $(
+                    let (_, buffer) = buffer.encode($prev)?;
+                )*
+                let (_, buffer) = buffer.encode($current)?;
+                Ok(((), buffer))
+            }
+        }
+
+        impl<'a,
+            _B: EncoderBuffer,
+            $($prev,)*
+            $current
+        > TypeEncoder<_B> for &'a ($($prev,)* $current,)
+        where
+            $(&'a $prev: TypeEncoder<_B>,)*
+            &'a $current: TypeEncoder<_B>
+        {
+            #[inline(always)]
+            fn encode_type(self, buffer: _B) -> Result<(), _B> {
+                #![allow(non_snake_case)]
+                let ($($prev ,)* $current,) = self;
+                $(
+                    let (_, buffer) = buffer.encode($prev)?;
+                )*
+                let (_, buffer) = buffer.encode($current)?;
+                Ok(((), buffer))
+            }
+        }
+
+        impl<'a,
+            _B: EncoderBuffer,
+            $($prev,)*
+            $current
+        > TypeEncoder<_B> for &'a mut ($($prev,)* $current,)
+        where
+            $(&'a mut $prev: TypeEncoder<_B>,)*
+            &'a mut $current: TypeEncoder<_B>
+        {
+            #[inline(always)]
+            fn encode_type(self, buffer: _B) -> Result<(), _B> {
+                #![allow(non_snake_case)]
+                let ($($prev ,)* $current,) = self;
+                $(
+                    let (_, buffer) = buffer.encode($prev)?;
+                )*
+                let (_, buffer) = buffer.encode($current)?;
+                Ok(((), buffer))
+            }
+        }
+
         impl_tuple!([$($rest,)*], [$($prev,)* $current]);
     };
 }
@@ -208,6 +303,20 @@ impl<B: SliceableBuffer> TypeDecoder<B> for () {
     }
 }
 
+impl<B: EncoderBuffer> TypeEncoder<B> for () {
+    #[inline(always)]
+    fn encode_type(self, buffer: B) -> Result<(), B> {
+        Ok(((), buffer))
+    }
+}
+
+impl<B: EncoderBuffer> TypeEncoder<B> for &() {
+    #[inline(always)]
+    fn encode_type(self, buffer: B) -> Result<(), B> {
+        Ok(((), buffer))
+    }
+}
+
 impl<B: FiniteBuffer, T: TypeDecoder<B>> TypeDecoder<B> for Option<T> {
     #[inline(always)]
     fn decode_type(buffer: B) -> Result<Self, B> {
@@ -216,6 +325,33 @@ impl<B: FiniteBuffer, T: TypeDecoder<B>> TypeDecoder<B> for Option<T> {
         } else {
             let (value, buffer) = T::decode_type(buffer)?;
             Ok((Some(value), buffer))
+        }
+    }
+}
+
+impl<B: EncoderBuffer, T: TypeEncoder<B>> TypeEncoder<B> for Option<T> {
+    #[inline(always)]
+    fn encode_type(self, buffer: B) -> Result<(), B> {
+        if let Some(value) = self {
+            let (_, buffer) = buffer.encode(value)?;
+            Ok(((), buffer))
+        } else {
+            Ok(((), buffer))
+        }
+    }
+}
+
+impl<'a, B: EncoderBuffer, T> TypeEncoder<B> for &'a Option<T>
+where
+    &'a T: TypeEncoder<B>,
+{
+    #[inline(always)]
+    fn encode_type(self, buffer: B) -> Result<(), B> {
+        if let Some(value) = self {
+            let (_, buffer) = buffer.encode(value)?;
+            Ok(((), buffer))
+        } else {
+            Ok(((), buffer))
         }
     }
 }

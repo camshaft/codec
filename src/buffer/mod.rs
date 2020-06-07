@@ -22,9 +22,9 @@ macro_rules! map_buffer_error {
     }};
 }
 
-mod peek;
+mod lookahead;
 
-pub use peek::*;
+pub use lookahead::*;
 
 #[derive(Clone, Copy, Debug)]
 pub struct BufferError<B> {
@@ -62,7 +62,7 @@ pub enum BufferErrorReason {
         requirement: usize,
     },
     InvalidValue {
-        reason: &'static str,
+        message: &'static str,
     },
 }
 
@@ -74,13 +74,13 @@ pub trait SliceableBuffer: Sized {
     fn slice(self, len: usize) -> Result<Self::Slice, Self>;
 
     #[inline(always)]
-    fn slice_with<T, F: FnOnce(PeekBuffer) -> Result<T, PeekBuffer>>(
+    fn slice_with<T, F: FnOnce(LookaheadBuffer) -> Result<T, LookaheadBuffer>>(
         self,
         len: usize,
         f: F,
     ) -> Result<T, Self> {
         let (a, b) = self.slice(len)?;
-        let res = f(PeekBuffer::new(a.as_less_safe_slice()));
+        let res = f(LookaheadBuffer::new(a.as_less_safe_slice()));
         let (v, b) = map_buffer_error!(res, b);
         Ok((v, b))
     }
@@ -111,7 +111,7 @@ where
     type FrozenSlice: SliceableBuffer;
 
     #[inline(always)]
-    fn slice_mut_with<T, F: FnOnce(PeekMutBuffer) -> Result<T, PeekMutBuffer>>(
+    fn slice_mut_with<T, F: FnOnce(LookaheadMutBuffer) -> Result<T, LookaheadMutBuffer>>(
         self,
         len: usize,
         f: F,
@@ -120,7 +120,7 @@ where
         Self::Slice: FiniteMutBuffer,
     {
         let (mut a, b) = self.slice(len)?;
-        let res = f(PeekMutBuffer::new(a.as_less_safe_mut_slice()));
+        let res = f(LookaheadMutBuffer::new(a.as_less_safe_mut_slice()));
         let (v, b) = map_buffer_error!(res, b);
         Ok((v, b))
     }
@@ -140,22 +140,22 @@ pub trait FiniteBuffer: SliceableBuffer {
     fn as_less_safe_slice(&self) -> &[u8];
 
     #[inline(always)]
-    fn peek<'a, T: TypeDecoder<PeekBuffer<'a>>>(&'a self) -> Result<T, PeekBuffer<'a>> {
-        self.peek_buffer().decode()
+    fn peek<'a, T: TypeDecoder<LookaheadBuffer<'a>>>(&'a self) -> Result<T, LookaheadBuffer<'a>> {
+        self.lookahead().decode()
     }
 
     #[inline(always)]
-    fn peek_with<'a, T, D: Decoder<T, PeekBuffer<'a>>>(
+    fn peek_with<'a, T, D: Decoder<T, LookaheadBuffer<'a>>>(
         &'a self,
         decoder: D,
-    ) -> Result<T, PeekBuffer<'a>> {
-        let buffer = self.peek_buffer();
+    ) -> Result<T, LookaheadBuffer<'a>> {
+        let buffer = self.lookahead();
         decoder.decode_from(buffer)
     }
 
     #[inline(always)]
-    fn peek_buffer(&self) -> PeekBuffer {
-        PeekBuffer::new(self.as_less_safe_slice())
+    fn lookahead(&self) -> LookaheadBuffer {
+        LookaheadBuffer::new(self.as_less_safe_slice())
     }
 
     #[inline(always)]
@@ -232,13 +232,9 @@ pub trait FiniteMutBuffer: FiniteBuffer {
     fn as_less_safe_mut_slice(&mut self) -> &mut [u8];
 
     #[inline(always)]
-    fn peek_mut_buffer(&mut self) -> PeekMutBuffer {
-        PeekMutBuffer::new(self.as_less_safe_mut_slice())
+    fn lookahead_mut(&mut self) -> LookaheadMutBuffer {
+        LookaheadMutBuffer::new(self.as_less_safe_mut_slice())
     }
-
-    // fn encoder(&mut self) -> FiniteEncoderBuffer<PeekMutBuffer> {
-    //     FiniteEncoderBuffer::new(self.peek_mut_buffer())
-    // }
 }
 
 pub trait BorrowedBuffer<'a>: FiniteBuffer {
