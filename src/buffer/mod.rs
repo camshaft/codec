@@ -212,8 +212,7 @@ pub trait FiniteBuffer: SliceableBuffer {
     #[inline(always)]
     fn ensure_alignment<T>(self) -> Result<usize, Self> {
         let requirement = core::mem::align_of::<T>();
-        let misalignment =
-            (self.as_less_safe_slice().as_ptr() as *const _ as *const () as usize) % requirement;
+        let misalignment = (self.as_less_safe_slice().as_ptr() as usize) % requirement;
         if misalignment == 0 {
             Ok((requirement, self))
         } else {

@@ -77,7 +77,7 @@ where
 {
     #[inline(always)]
     fn encode_into(self, value: T, buffer: E) -> Result<(), E> {
-        let capacity = buffer.capacity();
+        let capacity = buffer.encoder_capacity();
 
         // compute the maximum prefix given the current buffer capacity
         let max_value: L = capacity.try_into().unwrap_or(L::max_value());
@@ -148,25 +148,21 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
     fn encode_len_prefix_encoding_cap_test() {
         let mut buffer = [0; 512];
         let slice = &mut buffer[..];
         let value = [1u8; 256];
-        let (_, _) = slice
-            .encode_with(&value[..], LenPrefix::new::<u8>())
-            .unwrap();
+        let res = slice.encode_with(&value[..], LenPrefix::new::<u8>());
+        assert!(res.is_err());
     }
 
     #[test]
-    #[should_panic]
     fn encode_len_prefix_cap_test() {
         let mut buffer = [0; 4];
         let slice = &mut buffer[..];
         let value = [1u8; 16];
-        let (_, _) = slice
-            .encode_with(&value[..], LenPrefix::new::<u8>())
-            .unwrap();
+        let res = slice.encode_with(&value[..], LenPrefix::new::<u8>());
+        assert!(res.is_err());
     }
 
     #[test]

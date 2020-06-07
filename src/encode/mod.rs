@@ -1,6 +1,10 @@
 use crate::buffer::{BufferError, BufferErrorReason, Result};
 use core::mem::size_of;
 
+#[cfg(test)]
+#[macro_use]
+mod test_macros;
+
 mod cursor;
 mod len;
 
@@ -64,15 +68,14 @@ where
 pub trait EncoderBuffer: Sized {
     type Slice: EncoderBuffer;
 
-    fn capacity(&self) -> usize;
+    fn encoder_capacity(&self) -> usize;
 
     #[inline(always)]
     fn encode<T>(self, value: T) -> Result<usize, Self>
     where
         T: TypeEncoder<Self>,
     {
-        let (slice, buffer) = self.encode_checkpoint(|buffer| value.encode_type(buffer))?;
-        Ok((slice.capacity(), buffer))
+        self.checkpoint(|buffer| value.encode_type(buffer))
     }
 
     #[inline(always)]
@@ -80,9 +83,7 @@ pub trait EncoderBuffer: Sized {
     where
         E: Encoder<T, Self>,
     {
-        let (slice, buffer) =
-            self.encode_checkpoint(|buffer| encoder.encode_into(value, buffer))?;
-        Ok((slice.capacity(), buffer))
+        self.checkpoint(|buffer| encoder.encode_into(value, buffer))
     }
 
     #[inline(always)]
@@ -90,8 +91,8 @@ pub trait EncoderBuffer: Sized {
     where
         T: TypeEncoder<Self>,
     {
-        match self.encode_checkpoint(|buffer| value.encode_type(buffer)) {
-            Ok((slice, buffer)) => (Ok(slice.capacity()), buffer),
+        match self.checkpoint(|buffer| value.encode_type(buffer)) {
+            Ok((len, buffer)) => (Ok(len), buffer),
             Err(err) => (Err(err.reason), err.buffer),
         }
     }
@@ -105,8 +106,8 @@ pub trait EncoderBuffer: Sized {
     where
         E: Encoder<T, Self>,
     {
-        match self.encode_checkpoint(|buffer| encoder.encode_into(value, buffer)) {
-            Ok((slice, buffer)) => (Ok(slice.capacity()), buffer),
+        match self.checkpoint(|buffer| encoder.encode_into(value, buffer)) {
+            Ok((len, buffer)) => (Ok(len), buffer),
             Err(err) => (Err(err.reason), err.buffer),
         }
     }
@@ -116,7 +117,7 @@ pub trait EncoderBuffer: Sized {
     where
         T: TypeEncoder<LenEstimator>,
     {
-        LenEstimator::encoding_len(value, self.capacity())
+        LenEstimator::encoding_len(value, self.encoder_capacity())
     }
 
     fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self>;
@@ -127,9 +128,9 @@ pub trait EncoderBuffer: Sized {
         T: Copy + TypeEncoder<Self>,
     {
         let len = size_of::<T>() * count;
-        let (_, buffer) = self.ensure_capacity(len)?;
+        let (_, buffer) = self.ensure_encoder_capacity(len)?;
 
-        let (_, buffer) = buffer.encode_checkpoint(|mut buffer| {
+        let (_, buffer) = buffer.checkpoint(|mut buffer| {
             for _ in 0..count {
                 let (_, b) = buffer.encode(value)?;
                 buffer = b;
@@ -146,21 +147,19 @@ pub trait EncoderBuffer: Sized {
     where
         &'a T: TypeEncoder<Self>,
     {
-        let (slice, buffer) = self.encode_checkpoint(|mut buffer| {
+        self.checkpoint(|mut buffer| {
             for _ in 0..count {
                 let (_, b) = buffer.encode(value)?;
                 buffer = b;
             }
 
             Ok(((), buffer))
-        })?;
-
-        Ok((slice.capacity(), buffer))
+        })
     }
 
     #[inline(always)]
-    fn ensure_capacity(self, expected: usize) -> Result<usize, Self> {
-        let actual = self.capacity();
+    fn ensure_encoder_capacity(self, expected: usize) -> Result<usize, Self> {
+        let actual = self.encoder_capacity();
         if actual >= expected {
             Ok((actual, self))
         } else {
@@ -171,7 +170,7 @@ pub trait EncoderBuffer: Sized {
         }
     }
 
-    fn encode_checkpoint<F>(self, f: F) -> Result<Self::Slice, Self>
+    fn checkpoint<F>(self, f: F) -> Result<usize, Self>
     where
         F: FnOnce(Self) -> Result<(), Self>;
 }

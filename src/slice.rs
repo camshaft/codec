@@ -4,7 +4,7 @@ use crate::{
         SliceableBuffer, SliceableMutBuffer,
     },
     decode::TypeDecoder,
-    encode::{EncodeWithCursor, EncoderBuffer, EncoderCursor, TypeEncoder},
+    encode::{EncoderBuffer, TypeEncoder},
 };
 
 macro_rules! impl_slice {
@@ -80,7 +80,7 @@ impl EncoderBuffer for &mut [u8] {
     type Slice = Self;
 
     #[inline(always)]
-    fn capacity(&self) -> usize {
+    fn encoder_capacity(&self) -> usize {
         self.len()
     }
 
@@ -94,72 +94,32 @@ impl EncoderBuffer for &mut [u8] {
     }
 
     #[inline(always)]
-    fn encode_checkpoint<F>(self, f: F) -> Result<Self::Slice, Self>
+    fn checkpoint<F>(self, f: F) -> Result<usize, Self>
     where
         F: FnOnce(Self) -> Result<(), Self>,
     {
         let buffer_len = self.len();
 
-        let view = unsafe {
+        unsafe {
             use core::slice::from_raw_parts_mut;
-            from_raw_parts_mut(self.as_mut_ptr(), buffer_len)
-        };
+            let view = from_raw_parts_mut(self.as_mut_ptr(), buffer_len);
 
-        match f(view) {
-            Ok(((), buffer)) => {
-                let consumed_len = buffer_len - buffer.capacity();
-                drop(buffer);
-                Ok(self.split_at_mut(consumed_len))
-            }
-            Err(err) => {
-                let reason = err.reason;
-                drop(err);
-                Err(BufferError {
-                    reason,
-                    buffer: self,
-                })
-            }
-        }
-    }
-}
-
-impl<'a: 'child, 'child> EncodeWithCursor<'a, 'child> for &'a mut [u8] {
-    type Child = &'child mut [u8];
-
-    fn encode_with_cursor<T, F>(self, f: F) -> Result<EncoderCursor<T, Self::Slice>, Self>
-    where
-        F: FnOnce(Self::Child) -> Result<(), Self::Child>,
-    {
-        let initial_capacity = self.capacity();
-
-        let consumed_len = {
-            let child = unsafe {
-                use core::slice::from_raw_parts_mut;
-                let buffer_ptr = self.as_mut_ptr();
-                let buffer_len = self.len();
-                from_raw_parts_mut(buffer_ptr, buffer_len)
-            };
-            match f(child) {
-                Ok(((), buffer)) => initial_capacity
-                    .checked_sub(buffer.capacity())
-                    .expect("invalid final buffer len"),
+            match f(view) {
+                Ok(((), buffer)) => {
+                    let consumed_len = buffer_len - buffer.encoder_capacity();
+                    drop(buffer);
+                    let (_, buffer) = self.split_at_mut(consumed_len);
+                    Ok((consumed_len, buffer))
+                }
                 Err(err) => {
-                    return Err(BufferError {
-                        reason: err.reason,
+                    let reason = err.reason;
+                    drop(err);
+                    Err(BufferError {
+                        reason,
                         buffer: self,
                     })
                 }
             }
-        };
-
-        let (_, buffer) = self.ensure_capacity(consumed_len)?;
-
-        match buffer.slice(consumed_len) {
-            Ok((slice, buffer)) => {
-                let cursor = EncoderCursor::new(slice);
-                Ok((cursor, buffer))
-            }
-            Err(_) => panic!("misreported len"),
         }
     }
 }
@@ -190,4 +150,29 @@ where
         }
         Ok(((), buffer))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    encoder_buffer_tests!(
+        &mut [u8],
+        |len, out| {
+            let mut buffer = [0; len];
+            out = &mut buffer[..];
+        },
+        |_final| { &buffer[..] }
+    );
+}
+
+#[cfg(test)]
+mod double_borrow_tests {
+    encoder_buffer_tests!(
+        &mut [u8],
+        |len, out| {
+            let mut buffer = [0; len];
+            let borrowed = &mut buffer[..];
+            out = &mut borrowed[..];
+        },
+        |_final| { borrowed }
+    );
 }

@@ -63,7 +63,7 @@ impl<'a> EncoderBuffer for LookaheadMutBuffer<'a> {
     type Slice = Self;
 
     #[inline(always)]
-    fn capacity(&self) -> usize {
+    fn encoder_capacity(&self) -> usize {
         self.len()
     }
 
@@ -77,11 +77,11 @@ impl<'a> EncoderBuffer for LookaheadMutBuffer<'a> {
     }
 
     #[inline(always)]
-    fn encode_checkpoint<F>(self, f: F) -> Result<Self::Slice, Self>
+    fn checkpoint<F>(self, f: F) -> Result<usize, Self>
     where
         F: FnOnce(Self) -> Result<(), Self>,
     {
-        let res = self.0.encode_checkpoint(|buffer| match f(Self(buffer)) {
+        let res = self.0.checkpoint(|buffer| match f(Self(buffer)) {
             Ok(((), buffer)) => Ok(((), buffer.0)),
             Err(err) => Err(BufferError {
                 buffer: err.buffer.0,
@@ -90,7 +90,7 @@ impl<'a> EncoderBuffer for LookaheadMutBuffer<'a> {
         });
 
         match res {
-            Ok((slice, buffer)) => Ok((Self(slice), Self(buffer))),
+            Ok((len, buffer)) => Ok((len, Self(buffer))),
             Err(err) => Err(BufferError {
                 buffer: Self(err.buffer),
                 reason: err.reason,

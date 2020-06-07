@@ -211,6 +211,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn decode_aligned_deref_test() {
         let buffer = &[0, 1, 0, 0][..];
         let (value, _buffer) = buffer.decode_with(AlignedDeref).unwrap();
@@ -219,11 +220,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[cfg_attr(miri, ignore)]
     fn decode_aligned_deref_error_test() {
         let buffer = &[0, 1, 0, 0, 0][..];
         let (_, buffer) = buffer.decode::<u8>().unwrap();
-        let (value, _buffer) = buffer.decode_with(AlignedDeref).unwrap();
-        let _: AlignedStruct = value;
+        let res = buffer.decode_with::<AlignedStruct, _>(AlignedDeref);
+        assert!(res.is_err());
     }
 }

@@ -32,20 +32,20 @@ impl EncoderBuffer for LenEstimator {
     type Slice = Self;
 
     #[inline(always)]
-    fn capacity(&self) -> usize {
+    fn encoder_capacity(&self) -> usize {
         self.end - self.start
     }
 
     #[inline(always)]
     fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self> {
         let len = bytes.as_ref().len();
-        let (_, mut buffer) = self.ensure_capacity(len)?;
+        let (_, mut buffer) = self.ensure_encoder_capacity(len)?;
         buffer.start += len;
         Ok((len, buffer))
     }
 
     #[inline(always)]
-    fn encode_checkpoint<F>(self, f: F) -> Result<Self::Slice, Self>
+    fn checkpoint<F>(self, f: F) -> Result<usize, Self>
     where
         F: FnOnce(Self) -> Result<(), Self>,
     {
@@ -53,7 +53,7 @@ impl EncoderBuffer for LenEstimator {
         match f(self) {
             Ok(((), next)) => {
                 prev.end = next.start;
-                Ok((prev, next))
+                Ok((prev.encoder_capacity(), next))
             }
             Err(err) => Err(BufferError {
                 reason: err.reason,
@@ -61,4 +61,13 @@ impl EncoderBuffer for LenEstimator {
             }),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    encoder_buffer_tests!(LenEstimator, |len, out| {
+        out = LenEstimator { start: 0, end: len };
+    });
 }

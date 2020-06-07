@@ -1,9 +1,9 @@
 use crate::{
     buffer::{
-        BufferError, FiniteBuffer, FiniteMutBuffer, LookaheadBuffer, LookaheadMutBuffer, Result,
+        FiniteBuffer, FiniteMutBuffer, LookaheadBuffer, LookaheadMutBuffer, Result,
         SliceableBuffer, SliceableMutBuffer,
     },
-    encode::{EncodeWithCursor, EncoderBuffer, EncoderCursor},
+    encode::EncoderBuffer,
 };
 pub use bytes::{Bytes, BytesMut};
 
@@ -78,76 +78,49 @@ impl EncoderBuffer for BytesMut {
     type Slice = Self;
 
     #[inline(always)]
-    fn capacity(&self) -> usize {
-        self.len()
+    fn encoder_capacity(&self) -> usize {
+        self.capacity() - self.len()
     }
 
     #[inline(always)]
     fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self> {
         let bytes = bytes.as_ref();
         let len = bytes.len();
-        let (mut slice, buffer) = self.slice(len)?;
-        slice.as_less_safe_mut_slice().copy_from_slice(bytes);
+        let (_, mut buffer) = self.ensure_encoder_capacity(len)?;
+        buffer.extend_from_slice(bytes);
         Ok((len, buffer))
     }
 
     #[inline(always)]
-    fn encode_checkpoint<F>(self, f: F) -> Result<Self::Slice, Self>
+    fn checkpoint<F>(self, f: F) -> Result<usize, Self>
     where
         F: FnOnce(Self) -> Result<(), Self>,
     {
         let initial_len = self.len();
 
-        match f(self.clone()) {
-            Ok(((), buffer)) => {
-                let consumed_len = initial_len - buffer.capacity();
-                self.slice(consumed_len)
+        match f(self) {
+            Ok(((), buffer)) => Ok((buffer.len(), buffer)),
+            Err(mut err) => {
+                // roll back the len to the initial value
+                unsafe { err.buffer.set_len(initial_len) };
+                Err(err)
             }
-            Err(err) => Err(BufferError {
-                reason: err.reason,
-                buffer: self,
-            }),
         }
     }
 }
 
-impl<'a: 'child, 'child> EncodeWithCursor<'a, 'child> for BytesMut {
-    type Child = &'child mut [u8];
+#[cfg(test)]
+mod tests {
+    use super::BytesMut;
 
-    fn encode_with_cursor<T, F>(mut self, f: F) -> Result<EncoderCursor<T, Self::Slice>, Self>
-    where
-        F: FnOnce(Self::Child) -> Result<(), Self::Child>,
-    {
-        let initial_capacity = self.capacity();
-
-        let consumed_len = {
-            let child = unsafe {
-                use core::slice::from_raw_parts_mut;
-                let buffer_ptr = self.as_mut_ptr();
-                let buffer_len = self.len();
-                from_raw_parts_mut(buffer_ptr, buffer_len)
-            };
-            match f(child) {
-                Ok(((), buffer)) => initial_capacity
-                    .checked_sub(buffer.capacity())
-                    .expect("invalid final buffer len"),
-                Err(err) => {
-                    return Err(BufferError {
-                        reason: err.reason,
-                        buffer: self,
-                    })
-                }
-            }
-        };
-
-        let (_, buffer) = self.ensure_capacity(consumed_len)?;
-
-        match buffer.slice(consumed_len) {
-            Ok((slice, buffer)) => {
-                let cursor = EncoderCursor::new(slice);
-                Ok((cursor, buffer))
-            }
-            Err(_) => panic!("misreported len"),
+    encoder_buffer_tests!(
+        BytesMut,
+        |len, out| {
+            out = BytesMut::with_capacity(len);
+        },
+        |buffer| {
+            buffer.resize(len, 0);
+            &buffer[..]
         }
-    }
+    );
 }
