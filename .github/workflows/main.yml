@@ -37,7 +37,7 @@ jobs:
     strategy:
       matrix:
         rust: [stable, beta, nightly]
-        os: [ubuntu-latest, macOS-latest]
+        os: [ubuntu-latest, macOS-latest, windows-latest]
 
     steps:
     - uses: hecrj/setup-rust-action@v1
