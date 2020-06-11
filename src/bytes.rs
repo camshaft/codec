@@ -5,6 +5,7 @@ use crate::{
     },
     encode::EncoderBuffer,
 };
+use bytes::BufMut;
 pub use bytes::{Bytes, BytesMut};
 
 macro_rules! impl_bytes {
@@ -74,53 +75,81 @@ impl FiniteMutBuffer for BytesMut {
     }
 }
 
-impl EncoderBuffer for BytesMut {
-    type Slice = Self;
+macro_rules! impl_encoder_buffer {
+    ($ty:ty) => {
+        impl EncoderBuffer for $ty {
+            type Slice = Self;
 
-    #[inline(always)]
-    fn encoder_capacity(&self) -> usize {
-        self.capacity() - self.len()
-    }
+            #[inline(always)]
+            fn encoder_capacity(&self) -> usize {
+                BufMut::remaining_mut(self)
+            }
 
-    #[inline(always)]
-    fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self> {
-        let bytes = bytes.as_ref();
-        let len = bytes.len();
-        let (_, mut buffer) = self.ensure_encoder_capacity(len)?;
-        buffer.extend_from_slice(bytes);
-        Ok((len, buffer))
-    }
+            #[inline(always)]
+            fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self> {
+                let bytes = bytes.as_ref();
+                let len = bytes.len();
+                #[allow(unused_mut)]
+                let (_, mut buffer) = self.ensure_encoder_capacity(len)?;
+                buffer.extend_from_slice(bytes);
+                Ok((len, buffer))
+            }
 
-    #[inline(always)]
-    fn checkpoint<F>(self, f: F) -> Result<usize, Self>
-    where
-        F: FnOnce(Self) -> Result<(), Self>,
-    {
-        let initial_len = self.len();
+            #[inline(always)]
+            fn checkpoint<F>(self, f: F) -> Result<usize, Self>
+            where
+                F: FnOnce(Self) -> Result<(), Self>,
+            {
+                let initial_len = self.len();
 
-        match f(self) {
-            Ok(((), buffer)) => Ok((buffer.len(), buffer)),
-            Err(mut err) => {
-                // roll back the len to the initial value
-                unsafe { err.buffer.set_len(initial_len) };
-                Err(err)
+                match f(self) {
+                    Ok(((), buffer)) => Ok((buffer.len(), buffer)),
+                    #[allow(unused_mut)]
+                    Err(mut err) => {
+                        // roll back the len to the initial value
+                        unsafe { err.buffer.set_len(initial_len) };
+                        Err(err)
+                    }
+                }
             }
         }
-    }
+    };
 }
+
+impl_encoder_buffer!(BytesMut);
+impl_encoder_buffer!(&mut BytesMut);
 
 #[cfg(test)]
 mod tests {
     use super::BytesMut;
 
-    encoder_buffer_tests!(
-        BytesMut,
-        |len, out| {
-            out = BytesMut::with_capacity(len);
-        },
-        |buffer| {
-            buffer.resize(len, 0);
-            &buffer[..]
-        }
-    );
+    mod bytes_owned {
+        use super::*;
+
+        encoder_buffer_tests!(
+            BytesMut,
+            |len, out| {
+                out = BytesMut::with_capacity(len);
+            },
+            |buffer| {
+                buffer.resize(len.max(buffer.len()), 0);
+                &buffer[..]
+            }
+        );
+    }
+
+    mod bytes_ref {
+        use super::*;
+        encoder_buffer_tests!(
+            &mut BytesMut,
+            |len, out| {
+                let mut buffer = BytesMut::with_capacity(len);
+                out = &mut buffer;
+            },
+            |buffer| {
+                buffer.resize(len.max(buffer.len()), 0);
+                &buffer[..]
+            }
+        );
+    }
 }

@@ -22,9 +22,20 @@ impl LenEstimator {
             end: capacity,
         };
         match estimator.encode(value) {
-            Ok((len, _)) => Ok(len),
+            Ok((len, estimator)) => {
+                debug_assert_eq!(len, estimator.len());
+                Ok(len)
+            }
             Err(err) => Err(err.reason),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.start
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
