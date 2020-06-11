@@ -68,18 +68,18 @@ pub enum BufferErrorReason {
 
 pub type Result<T, B> = core::result::Result<(T, B), BufferError<B>>;
 
-pub trait SliceableBuffer: Sized {
+pub trait SplittableBuffer: Sized {
     type Slice: FiniteBuffer;
 
-    fn slice(self, len: usize) -> Result<Self::Slice, Self>;
+    fn checked_split(self, len: usize) -> Result<Self::Slice, Self>;
 
     #[inline(always)]
-    fn slice_with<T, F: FnOnce(LookaheadBuffer) -> Result<T, LookaheadBuffer>>(
+    fn checked_split_with<T, F: FnOnce(LookaheadBuffer) -> Result<T, LookaheadBuffer>>(
         self,
         len: usize,
         f: F,
     ) -> Result<T, Self> {
-        let (a, b) = self.slice(len)?;
+        let (a, b) = self.checked_split(len)?;
         let res = f(LookaheadBuffer::new(a.as_less_safe_slice()));
         let (v, b) = map_buffer_error!(res, b);
         Ok((v, b))
@@ -104,11 +104,11 @@ pub trait SliceableBuffer: Sized {
     }
 }
 
-pub trait SliceableMutBuffer: SliceableBuffer
+pub trait SplittableMutBuffer: SplittableBuffer
 where
     Self::Slice: FiniteMutBuffer,
 {
-    type FrozenSlice: SliceableBuffer;
+    type FrozenSlice: SplittableBuffer;
 
     #[inline(always)]
     fn slice_mut_with<T, F: FnOnce(LookaheadMutBuffer) -> Result<T, LookaheadMutBuffer>>(
@@ -119,14 +119,14 @@ where
     where
         Self::Slice: FiniteMutBuffer,
     {
-        let (mut a, b) = self.slice(len)?;
+        let (mut a, b) = self.checked_split(len)?;
         let res = f(LookaheadMutBuffer::new(a.as_less_safe_mut_slice()));
         let (v, b) = map_buffer_error!(res, b);
         Ok((v, b))
     }
 
     fn encode_slice(self, bytes: &[u8]) -> Result<Self::Slice, Self> {
-        let (mut target, buffer) = self.slice(bytes.len())?;
+        let (mut target, buffer) = self.checked_split(bytes.len())?;
 
         target.as_less_safe_mut_slice().copy_from_slice(bytes);
 
@@ -136,7 +136,7 @@ where
     fn freeze(self) -> Self::FrozenSlice;
 }
 
-pub trait FiniteBuffer: SliceableBuffer {
+pub trait FiniteBuffer: SplittableBuffer {
     fn as_less_safe_slice(&self) -> &[u8];
 
     #[inline(always)]
@@ -171,7 +171,7 @@ pub trait FiniteBuffer: SliceableBuffer {
     #[inline(always)]
     fn consume(self) -> (Self::Slice, Self) {
         let len = self.len();
-        match self.slice(len) {
+        match self.checked_split(len) {
             Ok((slice, buffer)) => (slice, buffer),
             _ => panic!("len was misreported"),
         }
@@ -247,7 +247,7 @@ pub trait BorrowedMutBuffer<'a>: FiniteMutBuffer {
 // #[cfg(test)]
 // mod tests {
 //     use crate::{
-//         buffer::{FiniteBuffer, SliceableBuffer},
+//         buffer::{FiniteBuffer, SplittableBuffer},
 //         bytes::*,
 //     };
 
@@ -261,7 +261,7 @@ pub trait BorrowedMutBuffer<'a>: FiniteMutBuffer {
 //         decode_check(d)
 //     }
 
-//     fn decode_check<S: SliceableBuffer>(s: S) {
+//     fn decode_check<S: SplittableBuffer>(s: S) {
 //         // let (_, s) = s.decode::<u8>().unwrap();
 //         // let (_, s) = s.decode::<u8>().unwrap();
 //         let _ = s;

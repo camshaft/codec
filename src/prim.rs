@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{FiniteBuffer, Result, SliceableBuffer},
+    buffer::{FiniteBuffer, Result, SplittableBuffer},
     decode::{Decoder, TypeDecoder},
     encode::{Encoder, EncoderBuffer, TypeEncoder},
     endian::{Big, Little, NETWORK},
@@ -41,10 +41,10 @@ macro_rules! impl_int_tests {
 
 macro_rules! impl_byte {
     ($ty:ident, $tests:ident) => {
-        impl<B: SliceableBuffer> TypeDecoder<B> for $ty {
+        impl<B: SplittableBuffer> TypeDecoder<B> for $ty {
             #[inline(always)]
             fn decode_type(buffer: B) -> Result<Self, B> {
-                buffer.slice_with(core::mem::size_of::<$ty>(), |slice| {
+                buffer.checked_split_with(core::mem::size_of::<$ty>(), |slice| {
                     let v = slice.as_less_safe_slice()[0] as $ty;
                     Ok((v, slice))
                 })
@@ -85,7 +85,7 @@ impl_byte!(i8, i8_tests);
 
 macro_rules! impl_integer {
     ($ty:ident $(, $tests:ident)?) => {
-        impl<B: SliceableBuffer> TypeDecoder<B> for $ty {
+        impl<B: SplittableBuffer> TypeDecoder<B> for $ty {
             #[inline(always)]
             fn decode_type(buffer: B) -> Result<Self, B> {
                 NETWORK.decode_from(buffer)
@@ -113,10 +113,10 @@ macro_rules! impl_integer {
             }
         }
 
-        impl<B: SliceableBuffer> Decoder<$ty, B> for Big {
+        impl<B: SplittableBuffer> Decoder<$ty, B> for Big {
             #[inline(always)]
             fn decode_from(self, buffer: B) -> Result<$ty, B> {
-                buffer.slice_with(core::mem::size_of::<$ty>(), |slice| {
+                buffer.checked_split_with(core::mem::size_of::<$ty>(), |slice| {
                     let value = $ty::from_be_bytes(
                         slice
                             .as_less_safe_slice()
@@ -150,10 +150,10 @@ macro_rules! impl_integer {
             }
         }
 
-        impl<B: SliceableBuffer> Decoder<$ty, B> for Little {
+        impl<B: SplittableBuffer> Decoder<$ty, B> for Little {
             #[inline(always)]
             fn decode_from(self, buffer: B) -> Result<$ty, B> {
-                buffer.slice_with(core::mem::size_of::<$ty>(), |slice| {
+                buffer.checked_split_with(core::mem::size_of::<$ty>(), |slice| {
                     let value = $ty::from_le_bytes(
                         slice
                             .as_less_safe_slice()
@@ -215,7 +215,7 @@ macro_rules! impl_tuple {
     };
     ([$current:ident, $($rest:ident,)*], [$($prev:ident),*]) => {
         impl<
-            _B: SliceableBuffer,
+            _B: SplittableBuffer,
             $($prev: TypeDecoder<_B>,)*
             $current: TypeDecoder<_B>
         > TypeDecoder<_B> for ($($prev,)* $current,) {
@@ -296,7 +296,7 @@ macro_rules! impl_tuple {
 
 impl_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
 
-impl<B: SliceableBuffer> TypeDecoder<B> for () {
+impl<B: SplittableBuffer> TypeDecoder<B> for () {
     #[inline(always)]
     fn decode_type(buffer: B) -> Result<Self, B> {
         Ok(((), buffer))

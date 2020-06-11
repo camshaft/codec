@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Result, SliceableBuffer},
+    buffer::{Result, SplittableBuffer},
     decode::Decoder,
 };
 
@@ -8,7 +8,7 @@ macro_rules! impl_endian {
         #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
         pub struct $name;
 
-        impl<T, B: SliceableBuffer> Decoder<T, B> for &$name
+        impl<T, B: SplittableBuffer> Decoder<T, B> for &$name
         where
             $name: Decoder<T, B>,
         {
@@ -36,7 +36,7 @@ pub enum Endian {
     Little,
 }
 
-impl<T, B: SliceableBuffer> Decoder<T, B> for Endian
+impl<T, B: SplittableBuffer> Decoder<T, B> for Endian
 where
     Big: Decoder<T, B>,
     Little: Decoder<T, B>,
@@ -50,7 +50,7 @@ where
     }
 }
 
-impl<T, B: SliceableBuffer> Decoder<T, B> for &Endian
+impl<T, B: SplittableBuffer> Decoder<T, B> for &Endian
 where
     Endian: Decoder<T, B>,
 {

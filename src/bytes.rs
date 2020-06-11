@@ -1,7 +1,7 @@
 use crate::{
     buffer::{
         FiniteBuffer, FiniteMutBuffer, LookaheadBuffer, LookaheadMutBuffer, Result,
-        SliceableBuffer, SliceableMutBuffer,
+        SplittableBuffer, SplittableMutBuffer,
     },
     encode::EncoderBuffer,
 };
@@ -9,18 +9,18 @@ pub use bytes::{Bytes, BytesMut};
 
 macro_rules! impl_bytes {
     ($name:ident) => {
-        impl SliceableBuffer for $name {
+        impl SplittableBuffer for $name {
             type Slice = $name;
 
             #[inline(always)]
-            fn slice(self, offset: usize) -> Result<Self::Slice, Self> {
+            fn checked_split(self, offset: usize) -> Result<Self::Slice, Self> {
                 let (_, mut buffer) = self.ensure_len(offset)?;
                 let b = buffer.split_off(offset);
                 Ok((buffer, b))
             }
 
             #[inline(always)]
-            fn slice_with<T, F: FnOnce(LookaheadBuffer) -> Result<T, LookaheadBuffer>>(
+            fn checked_split_with<T, F: FnOnce(LookaheadBuffer) -> Result<T, LookaheadBuffer>>(
                 self,
                 len: usize,
                 f: F,
@@ -45,7 +45,7 @@ macro_rules! impl_bytes {
 impl_bytes!(Bytes);
 impl_bytes!(BytesMut);
 
-impl SliceableMutBuffer for BytesMut {
+impl SplittableMutBuffer for BytesMut {
     type FrozenSlice = Bytes;
 
     #[inline(always)]

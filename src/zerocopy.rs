@@ -1,14 +1,9 @@
 use crate::{
-    buffer::{FiniteBuffer, FiniteMutBuffer, Result, SliceableBuffer, SliceableMutBuffer},
+    buffer::{FiniteBuffer, FiniteMutBuffer, Result, SplittableBuffer, SplittableMutBuffer},
     decode::{Decoder, TypeDecoder},
     encode::{EncoderBuffer, TypeEncoder},
 };
-use core::{
-    cmp::Ordering,
-    marker::PhantomData,
-    mem::size_of,
-    ops::{Deref, DerefMut},
-};
+use core::{cmp::Ordering, marker::PhantomData, mem::size_of, ops};
 use zerocopy::{AsBytes, ByteSlice, FromBytes, Unaligned};
 
 #[derive(Copy, Clone, FromBytes, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -65,7 +60,7 @@ macro_rules! impl_ref {
             }
         }
 
-        impl<T: FromBytes $(+ $constraint)*, Buffer: FiniteBuffer> Deref for $name<T, Buffer> {
+        impl<T: FromBytes $(+ $constraint)*, Buffer: FiniteBuffer> ops::Deref for $name<T, Buffer> {
             type Target = T;
 
             #[inline(always)]
@@ -79,7 +74,7 @@ macro_rules! impl_ref {
         {
             #[inline(always)]
             fn decode_type(buffer: B) -> Result<Self, B> {
-                let (owner, buffer) = buffer.slice(size_of::<T>())?;
+                let (owner, buffer) = buffer.checked_split(size_of::<T>())?;
                 $(
                     {
                         if let Err(err) = owner.lookahead().$ensure_alignment::<T>() {
@@ -126,33 +121,10 @@ macro_rules! impl_ref {
     };
 }
 
-impl_ref!(
-    AlignedRef,
-    SliceableBuffer,
-    FiniteBuffer,
-    [],
-    ensure_alignment
-);
-impl_ref!(
-    AlignedMut,
-    SliceableMutBuffer,
-    FiniteMutBuffer,
-    [AsBytes],
-    ensure_alignment
-);
-impl_ref!(UnalignedRef, SliceableBuffer, FiniteBuffer, []);
-impl_ref!(UnalignedMut, SliceableMutBuffer, FiniteMutBuffer, [AsBytes]);
+impl_ref!(Ref, SplittableBuffer, FiniteBuffer, []);
+impl_ref!(Mut, SplittableMutBuffer, FiniteMutBuffer, [AsBytes]);
 
-impl<T: AsBytes + FromBytes, Buffer: FiniteMutBuffer> DerefMut for AlignedMut<T, Buffer> {
-    #[inline(always)]
-    fn deref_mut(&mut self) -> &mut T {
-        unsafe { self.buffer.as_mut() }
-    }
-}
-
-impl<T: AsBytes + FromBytes + Unaligned, Buffer: FiniteMutBuffer> DerefMut
-    for UnalignedMut<T, Buffer>
-{
+impl<T: AsBytes + FromBytes + Unaligned, Buffer: FiniteMutBuffer> ops::DerefMut for Mut<T, Buffer> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut T {
         unsafe { self.buffer.as_mut() }
@@ -174,57 +146,33 @@ macro_rules! impl_deref {
     };
 }
 
-impl_deref!(AlignedDeref, AlignedRef, []);
-impl_deref!(UnalignedDeref, UnalignedRef, [Unaligned]);
+impl_deref!(Deref, Ref, [Unaligned]);
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(Copy, Clone, Debug, FromBytes, PartialEq, Eq, PartialOrd)]
-    struct AlignedStruct {
-        field: u32,
-    }
-
     #[test]
     fn decode_unaligned_ref_test() {
         let buffer = &[0, 1, 2, 3][..];
         let (value, _buffer) = buffer.decode().unwrap();
-        let value: UnalignedRef<[u8; 2], _> = value;
+        let value: Ref<[u8; 2], _> = value;
         assert_eq!(value, [0, 1]);
     }
 
     #[test]
-    fn decode_aligned_ref_test() {
-        let buffer = &[0, 1, 2, 3][..];
+    fn decode_unaligned_mut_test() {
+        let buffer = &mut [0, 1, 2, 3][..];
         let (value, _buffer) = buffer.decode().unwrap();
-        let value: AlignedRef<[u8; 2], _> = value;
+        let value: Mut<[u8; 2], _> = value;
         assert_eq!(value, [0, 1]);
     }
 
     #[test]
     fn decode_unaligned_deref_test() {
         let buffer = &[0, 1, 2, 3][..];
-        let (value, _buffer) = buffer.decode_with(UnalignedDeref).unwrap();
+        let (value, _buffer) = buffer.decode_with(Deref).unwrap();
         let value: [u8; 2] = value;
         assert_eq!(value, [0, 1]);
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn decode_aligned_deref_test() {
-        let buffer = &[0, 1, 0, 0][..];
-        let (value, _buffer) = buffer.decode_with(AlignedDeref).unwrap();
-        let value: AlignedStruct = value;
-        assert_eq!(value, AlignedStruct { field: 256 });
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn decode_aligned_deref_error_test() {
-        let buffer = &[0, 1, 0, 0, 0][..];
-        let (_, buffer) = buffer.decode::<u8>().unwrap();
-        let res = buffer.decode_with::<AlignedStruct, _>(AlignedDeref);
-        assert!(res.is_err());
     }
 }

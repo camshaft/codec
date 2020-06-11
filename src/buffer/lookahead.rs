@@ -1,7 +1,7 @@
 use crate::{
     buffer::{
         BorrowedBuffer, BorrowedMutBuffer, BufferError, FiniteBuffer, FiniteMutBuffer, Result,
-        SliceableBuffer,
+        SplittableBuffer,
     },
     encode::EncoderBuffer,
 };
@@ -18,12 +18,12 @@ macro_rules! impl_lookahead {
             }
         }
 
-        impl<$a> SliceableBuffer for $name<$a> {
+        impl<$a> SplittableBuffer for $name<$a> {
             type Slice = $name<$a>;
 
             #[inline(always)]
-            fn slice(self, offset: usize) -> Result<Self::Slice, Self> {
-                let (a, b) = self.0.slice(offset).map_err(|err| err.map_buffer($name))?;
+            fn checked_split(self, offset: usize) -> Result<Self::Slice, Self> {
+                let (a, b) = self.0.checked_split(offset).map_err(|err| err.map_buffer($name))?;
                 Ok(($name(a), $name(b)))
             }
         }
@@ -71,7 +71,7 @@ impl<'a> EncoderBuffer for LookaheadMutBuffer<'a> {
     fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self> {
         let bytes = bytes.as_ref();
         let len = bytes.len();
-        let (mut slice, buffer) = self.slice(len)?;
+        let (mut slice, buffer) = self.checked_split(len)?;
         slice.as_less_safe_mut_slice().copy_from_slice(bytes);
         Ok((len, buffer))
     }

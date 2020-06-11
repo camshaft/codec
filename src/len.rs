@@ -1,6 +1,6 @@
 use crate::{
     buffer::{
-        BufferError, FiniteBuffer, FiniteMutBuffer, Result, SliceableBuffer, SliceableMutBuffer,
+        BufferError, FiniteBuffer, FiniteMutBuffer, Result, SplittableBuffer, SplittableMutBuffer,
     },
     decode::{Decoder, TypeDecoder},
     encode::{Encoder, EncoderBuffer, LenEstimator, TypeEncoder},
@@ -28,7 +28,7 @@ where
         let (len, buffer) = buffer.decode::<L>()?;
         // If it doesn't fit then we most likely won't be able to read it anyway
         let slice_len = len.try_into().unwrap_or(usize::MAX);
-        let (slice, buffer) = buffer.slice(slice_len)?;
+        let (slice, buffer) = buffer.checked_split(slice_len)?;
         let (value, buffer) = map_buffer_error!(slice.consumed_decode(), buffer);
         Ok((Self { len, value }, buffer))
     }
@@ -64,15 +64,15 @@ where
 
 impl<T, L, E> Encoder<T, E> for LenPrefix<L>
 where
-    E: EncoderBuffer + SliceableBuffer + SliceableMutBuffer,
-    <E as SliceableBuffer>::Slice: EncoderBuffer + FiniteMutBuffer,
-    L: TypeEncoder<<E as SliceableBuffer>::Slice>
+    E: EncoderBuffer + SplittableBuffer + SplittableMutBuffer,
+    <E as SplittableBuffer>::Slice: EncoderBuffer + FiniteMutBuffer,
+    L: TypeEncoder<<E as SplittableBuffer>::Slice>
         + TypeEncoder<LenEstimator>
         + TryInto<usize>
         + TryFrom<usize>
         + Bounded
         + Copy,
-    T: TypeEncoder<<E as SliceableBuffer>::Slice>,
+    T: TypeEncoder<<E as SplittableBuffer>::Slice>,
     for<'a> &'a T: TypeEncoder<LenEstimator>,
 {
     #[inline(always)]
@@ -80,7 +80,7 @@ where
         let capacity = buffer.encoder_capacity();
 
         // compute the maximum prefix given the current buffer capacity
-        let max_value: L = capacity.try_into().unwrap_or(L::max_value());
+        let max_value: L = capacity.try_into().unwrap_or_else(|_| L::max_value());
 
         // compute the maximum bytes the prefix needs
         let prefix_len = match LenEstimator::encoding_len(max_value, capacity) {
@@ -110,7 +110,7 @@ where
         };
 
         // slice off the buffer to ensure the value encoder has the correct capacity
-        let (slice, buffer) = <E as SliceableBuffer>::slice(buffer, prefix_len + value_len)?;
+        let (slice, buffer) = buffer.checked_split(prefix_len + value_len)?;
 
         // perform the actual encoding
         match Ok(((), slice))

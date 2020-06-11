@@ -1,7 +1,7 @@
 use crate::{
     buffer::{
         BorrowedBuffer, BorrowedMutBuffer, BufferError, FiniteBuffer, FiniteMutBuffer, Result,
-        SliceableBuffer, SliceableMutBuffer,
+        SplittableBuffer, SplittableMutBuffer,
     },
     decode::TypeDecoder,
     encode::{EncoderBuffer, TypeEncoder},
@@ -9,11 +9,11 @@ use crate::{
 
 macro_rules! impl_slice {
     ($a:lifetime, $ty:ty, $split:ident) => {
-        impl<$a> SliceableBuffer for $ty {
+        impl<$a> SplittableBuffer for $ty {
             type Slice = $ty;
 
             #[inline(always)]
-            fn slice(
+            fn checked_split(
                 self,
                 offset: usize,
             ) -> Result<Self::Slice, Self> {
@@ -60,7 +60,7 @@ impl FiniteMutBuffer for &mut [u8] {
     }
 }
 
-impl<'a> SliceableMutBuffer for &'a mut [u8] {
+impl<'a> SplittableMutBuffer for &'a mut [u8] {
     type FrozenSlice = &'a [u8];
 
     #[inline(always)]
@@ -88,7 +88,7 @@ impl EncoderBuffer for &mut [u8] {
     fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self> {
         let bytes = bytes.as_ref();
         let len = bytes.len();
-        let (mut slice, buffer) = self.slice(len)?;
+        let (mut slice, buffer) = self.checked_split(len)?;
         slice.as_less_safe_mut_slice().copy_from_slice(bytes);
         Ok((len, buffer))
     }
@@ -107,7 +107,7 @@ impl EncoderBuffer for &mut [u8] {
             match f(view) {
                 Ok(((), buffer)) => {
                     let consumed_len = buffer_len - buffer.encoder_capacity();
-                    drop(buffer);
+                    let _ = buffer;
                     let (_, buffer) = self.split_at_mut(consumed_len);
                     Ok((consumed_len, buffer))
                 }
