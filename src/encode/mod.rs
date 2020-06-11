@@ -5,10 +5,10 @@ use core::mem::size_of;
 #[macro_use]
 mod test_macros;
 
-mod cursor;
+// mod cursor;
 mod len;
 
-pub use cursor::*;
+// pub use cursor::*;
 pub use len::*;
 
 pub trait Encoder<T, B>: Sized
