@@ -78,8 +78,6 @@ impl FiniteMutBuffer for BytesMut {
 macro_rules! impl_encoder_buffer {
     ($ty:ty) => {
         impl EncoderBuffer for $ty {
-            type Slice = Self;
-
             #[inline(always)]
             fn encoder_capacity(&self) -> usize {
                 BufMut::remaining_mut(self)
@@ -103,7 +101,7 @@ macro_rules! impl_encoder_buffer {
                 let initial_len = self.len();
 
                 match f(self) {
-                    Ok(((), buffer)) => Ok((buffer.len(), buffer)),
+                    Ok(((), buffer)) => Ok((buffer.len() - initial_len, buffer)),
                     #[allow(unused_mut)]
                     Err(mut err) => {
                         // roll back the len to the initial value
@@ -118,6 +116,44 @@ macro_rules! impl_encoder_buffer {
 
 impl_encoder_buffer!(BytesMut);
 impl_encoder_buffer!(&mut BytesMut);
+
+// TODO specialize on bytes for zero copy
+macro_rules! impl_codec {
+    ($ty:ty, | $slice:ident | $new:expr) => {
+        impl<B: FiniteBuffer> crate::decode::TypeDecoder<B> for $ty {
+            #[inline(always)]
+            fn decode_type(buffer: B) -> Result<$ty, B> {
+                let (slice, buffer) = buffer.consume();
+                let $slice = slice.as_less_safe_slice();
+                let value = $new;
+                Ok((value, buffer))
+            }
+        }
+
+        impl<B: EncoderBuffer> crate::encode::TypeEncoder<B> for $ty {
+            #[inline(always)]
+            fn encode_type(self, buffer: B) -> Result<(), B> {
+                let (_, buffer) = buffer.encode_bytes(&self[..])?;
+                Ok(((), buffer))
+            }
+        }
+
+        impl<B: EncoderBuffer> crate::encode::TypeEncoder<B> for &$ty {
+            #[inline(always)]
+            fn encode_type(self, buffer: B) -> Result<(), B> {
+                let (_, buffer) = buffer.encode_bytes(&self[..])?;
+                Ok(((), buffer))
+            }
+        }
+    };
+}
+
+impl_codec!(Bytes, |slice| Bytes::copy_from_slice(slice));
+impl_codec!(BytesMut, |slice| {
+    let mut buffer = BytesMut::with_capacity(slice.len());
+    buffer.extend_from_slice(slice);
+    buffer
+});
 
 #[cfg(test)]
 mod tests {

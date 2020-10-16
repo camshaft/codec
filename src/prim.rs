@@ -1,6 +1,6 @@
 use crate::{
     buffer::{FiniteBuffer, Result, SplittableBuffer},
-    decode::{Decoder, TypeDecoder},
+    decode::{Decoder, DecoderBuffer, TypeDecoder},
     encode::{Encoder, EncoderBuffer, TypeEncoder},
     endian::{Big, Little, NETWORK},
 };

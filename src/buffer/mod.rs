@@ -1,7 +1,5 @@
-use crate::{
-    decode::{Decoder, TypeDecoder},
-    len::LenPrefix,
-};
+use crate::decode::{Decoder, DecoderBuffer, TypeDecoder};
+use core::fmt;
 
 macro_rules! map_buffer_error {
     ($expr:expr, $prev:expr) => {{
@@ -48,23 +46,38 @@ impl<B> BufferError<B> {
     }
 }
 
+impl<B> fmt::Display for BufferError<B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.reason.fmt(f)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<B: core::fmt::Debug> std::error::Error for BufferError<B> {}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BufferErrorReason {
-    UnexpectedEof {
-        actual: usize,
-        expected: usize,
-    },
-    UnexpectedBytes {
-        len: usize,
-    },
-    UnexpectedAlignment {
-        misalignment: usize,
-        requirement: usize,
-    },
-    InvalidValue {
-        message: &'static str,
-    },
+    UnexpectedEof { actual: usize, expected: usize },
+    UnexpectedBytes { len: usize },
+    InvalidValue { message: &'static str },
 }
+
+impl fmt::Display for BufferErrorReason {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::UnexpectedEof { actual, expected } => writeln!(
+                f,
+                "unexpected EOF: actual = {}, expected = {}",
+                actual, expected
+            ),
+            Self::UnexpectedBytes { len } => writeln!(f, "unexpected bytes: remaining = {}", len),
+            Self::InvalidValue { message } => writeln!(f, "invalid value: {}", message),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for BufferErrorReason {}
 
 pub type Result<T, B> = core::result::Result<(T, B), BufferError<B>>;
 
@@ -84,24 +97,6 @@ pub trait SplittableBuffer: Sized {
         let (v, b) = map_buffer_error!(res, b);
         Ok((v, b))
     }
-
-    #[inline(always)]
-    fn decode<T: TypeDecoder<Self>>(self) -> Result<T, Self> {
-        T::decode_type(self)
-    }
-
-    #[inline(always)]
-    fn decode_with<T, D: Decoder<T, Self>>(self, decoder: D) -> Result<T, Self> {
-        decoder.decode_from(self)
-    }
-
-    #[inline(always)]
-    fn decode_with_len_prefix<T, L>(self) -> Result<T, Self>
-    where
-        LenPrefix<L>: Decoder<T, Self>,
-    {
-        LenPrefix::new().decode_from(self)
-    }
 }
 
 pub trait SplittableMutBuffer: SplittableBuffer
@@ -115,10 +110,7 @@ where
         self,
         len: usize,
         f: F,
-    ) -> Result<T, Self>
-    where
-        Self::Slice: FiniteMutBuffer,
-    {
+    ) -> Result<T, Self> {
         let (mut a, b) = self.checked_split(len)?;
         let res = f(LookaheadMutBuffer::new(a.as_less_safe_mut_slice()));
         let (v, b) = map_buffer_error!(res, b);
@@ -136,7 +128,7 @@ where
     fn freeze(self) -> Self::FrozenSlice;
 }
 
-pub trait FiniteBuffer: SplittableBuffer {
+pub trait FiniteBuffer: SplittableBuffer<Slice = Self> {
     fn as_less_safe_slice(&self) -> &[u8];
 
     #[inline(always)]
@@ -204,23 +196,6 @@ pub trait FiniteBuffer: SplittableBuffer {
         } else {
             Err(BufferError {
                 reason: BufferErrorReason::UnexpectedBytes { len: self.len() },
-                buffer: self,
-            })
-        }
-    }
-
-    #[inline(always)]
-    fn ensure_alignment<T>(self) -> Result<usize, Self> {
-        let requirement = core::mem::align_of::<T>();
-        let misalignment = (self.as_less_safe_slice().as_ptr() as usize) % requirement;
-        if misalignment == 0 {
-            Ok((requirement, self))
-        } else {
-            Err(BufferError {
-                reason: BufferErrorReason::UnexpectedAlignment {
-                    requirement,
-                    misalignment,
-                },
                 buffer: self,
             })
         }

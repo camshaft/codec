@@ -60,8 +60,6 @@ impl<'a> BorrowedMutBuffer<'a> for LookaheadMutBuffer<'a> {
 }
 
 impl<'a> EncoderBuffer for LookaheadMutBuffer<'a> {
-    type Slice = Self;
-
     #[inline(always)]
     fn encoder_capacity(&self) -> usize {
         self.len()

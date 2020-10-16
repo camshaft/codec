@@ -1,5 +1,8 @@
 use crate::{
-    buffer::{BufferError, BufferErrorReason, Result},
+    buffer::{
+        BufferError, BufferErrorReason, FiniteBuffer, FiniteMutBuffer, Result, SplittableBuffer,
+        SplittableMutBuffer,
+    },
     encode::{EncoderBuffer, TypeEncoder},
 };
 
@@ -7,8 +10,7 @@ pub type LenResult = core::result::Result<usize, BufferErrorReason>;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct LenEstimator {
-    start: usize,
-    end: usize,
+    len: usize,
 }
 
 impl LenEstimator {
@@ -17,21 +19,15 @@ impl LenEstimator {
     where
         T: TypeEncoder<Self>,
     {
-        let estimator = LenEstimator {
-            start: 0,
-            end: capacity,
-        };
+        let estimator = LenEstimator { len: capacity };
         match estimator.encode(value) {
-            Ok((len, estimator)) => {
-                debug_assert_eq!(len, estimator.len());
-                Ok(len)
-            }
+            Ok((len, _estimator)) => Ok(len),
             Err(err) => Err(err.reason),
         }
     }
 
     pub fn len(&self) -> usize {
-        self.start
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
@@ -40,18 +36,15 @@ impl LenEstimator {
 }
 
 impl EncoderBuffer for LenEstimator {
-    type Slice = Self;
-
     #[inline(always)]
     fn encoder_capacity(&self) -> usize {
-        self.end - self.start
+        self.len()
     }
 
     #[inline(always)]
     fn encode_bytes<T: AsRef<[u8]>>(self, bytes: T) -> Result<usize, Self> {
         let len = bytes.as_ref().len();
-        let (_, mut buffer) = self.ensure_encoder_capacity(len)?;
-        buffer.start += len;
+        let (_, buffer) = self.checked_split(len)?;
         Ok((len, buffer))
     }
 
@@ -60,11 +53,11 @@ impl EncoderBuffer for LenEstimator {
     where
         F: FnOnce(Self) -> Result<(), Self>,
     {
-        let mut prev = self;
+        let prev = self;
         match f(self) {
             Ok(((), next)) => {
-                prev.end = next.start;
-                Ok((prev.encoder_capacity(), next))
+                let consumed_len = prev.len() - next.len();
+                Ok((consumed_len, next))
             }
             Err(err) => Err(BufferError {
                 reason: err.reason,
@@ -74,11 +67,48 @@ impl EncoderBuffer for LenEstimator {
     }
 }
 
+impl FiniteBuffer for LenEstimator {
+    fn as_less_safe_slice(&self) -> &[u8] {
+        panic!("cannot read the slice of a len estimator");
+    }
+
+    fn len(&self) -> usize {
+        Self::len(self)
+    }
+}
+
+impl FiniteMutBuffer for LenEstimator {
+    fn as_less_safe_mut_slice(&mut self) -> &mut [u8] {
+        panic!("cannot read the mut slice of a len estimator");
+    }
+}
+
+impl SplittableBuffer for LenEstimator {
+    type Slice = Self;
+
+    fn checked_split(self, len: usize) -> Result<Self::Slice, Self> {
+        let (_, buffer) = self.ensure_encoder_capacity(len)?;
+        let slice = LenEstimator { len };
+        let buffer = LenEstimator {
+            len: buffer.len - len,
+        };
+        Ok((slice, buffer))
+    }
+}
+
+impl SplittableMutBuffer for LenEstimator {
+    type FrozenSlice = Self;
+
+    fn freeze(self) -> Self::FrozenSlice {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     encoder_buffer_tests!(LenEstimator, |len, out| {
-        out = LenEstimator { start: 0, end: len };
+        out = LenEstimator { len };
     });
 }

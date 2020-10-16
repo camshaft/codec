@@ -66,8 +66,6 @@ where
 }
 
 pub trait EncoderBuffer: Sized {
-    type Slice: EncoderBuffer;
-
     fn encoder_capacity(&self) -> usize;
 
     #[inline(always)]

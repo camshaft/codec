@@ -151,6 +151,7 @@ impl_deref!(Deref, Ref, [Unaligned]);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decode::DecoderBuffer;
 
     #[test]
     fn decode_unaligned_ref_test() {

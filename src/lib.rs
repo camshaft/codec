@@ -9,6 +9,10 @@ pub mod endian;
 pub mod len;
 pub mod prim;
 pub mod slice;
+pub mod tlv;
+
+#[cfg(feature = "std")]
+pub mod net;
 
 #[cfg(feature = "bytes")]
 pub mod bytes;

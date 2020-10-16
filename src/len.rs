@@ -2,7 +2,7 @@ use crate::{
     buffer::{
         BufferError, FiniteBuffer, FiniteMutBuffer, Result, SplittableBuffer, SplittableMutBuffer,
     },
-    decode::{Decoder, TypeDecoder},
+    decode::{Decoder, DecoderBuffer, TypeDecoder},
     encode::{Encoder, EncoderBuffer, LenEstimator, TypeEncoder},
 };
 use core::{
@@ -34,8 +34,16 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LenPrefix<L>(PhantomData<L>);
+
+impl<L> Clone for LenPrefix<L> {
+    fn clone(&self) -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<L> Copy for LenPrefix<L> {}
 
 impl<L> Default for LenPrefix<L> {
     fn default() -> Self {
@@ -126,7 +134,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{buffer::*, len::*};
+    use super::*;
 
     #[test]
     fn decode_len_prefix_test() {
@@ -163,14 +171,6 @@ mod tests {
         let value = [1u8; 16];
         let res = slice.encode_with(&value[..], LenPrefix::new::<u8>());
         assert!(res.is_err());
-    }
-
-    #[test]
-    fn decode_with_len_prefix_test() {
-        let buffer = &[2, 0, 1][..];
-        let (value, _buffer) = buffer.decode_with_len_prefix::<_, u8>().unwrap();
-        let value: u16 = value;
-        assert_eq!(value, 1);
     }
 
     #[test]

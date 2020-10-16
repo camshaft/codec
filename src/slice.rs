@@ -77,8 +77,6 @@ impl<'a> BorrowedMutBuffer<'a> for &'a mut [u8] {
 }
 
 impl EncoderBuffer for &mut [u8] {
-    type Slice = Self;
-
     #[inline(always)]
     fn encoder_capacity(&self) -> usize {
         self.len()
